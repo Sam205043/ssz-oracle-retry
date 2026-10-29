@@ -1,0 +1,60 @@
+name: Oracle free server retry
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: oci-retry
+  cancel-in-progress: false
+
+jobs:
+  try:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OCI_TENANCY: ${{ secrets.OCI_TENANCY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Already done?
+        run: |
+          if gh issue list --state all --search "SERVER BAN GAYA in:title" --json number -q '.[].number' | grep -q .; then
+            echo "Server pehle hi ban chuka hai - kuch nahi karna."
+            echo "DONE=1" >> "$GITHUB_ENV"
+          fi
+
+      - name: Install OCI CLI
+        if: env.DONE != '1'
+        run: pip install --quiet oci-cli
+
+      - name: OCI config
+        if: env.DONE != '1'
+        env:
+          OCI_KEY: ${{ secrets.OCI_KEY }}
+          OCI_USER: ${{ secrets.OCI_USER }}
+          OCI_FINGERPRINT: ${{ secrets.OCI_FINGERPRINT }}
+        run: |
+          mkdir -p ~/.oci
+          printf '%s\n' "$OCI_KEY" > ~/.oci/key.pem
+          chmod 600 ~/.oci/key.pem
+          cat > ~/.oci/config <<EOF
+          [DEFAULT]
+          user=$OCI_USER
+          fingerprint=$OCI_FINGERPRINT
+          tenancy=$OCI_TENANCY
+          region=ap-mumbai-1
+          key_file=~/.oci/key.pem
+          EOF
+          sed -i 's/^ *//' ~/.oci/config
+          chmod 600 ~/.oci/config
+
+      - name: Try to create server
+        if: env.DONE != '1'
+        run: bash launch.sh
